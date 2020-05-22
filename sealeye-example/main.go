@@ -24,7 +24,7 @@ type rootCLI struct {
 	// Func is called when all command line parsing succeeds and the command
 	// should actually be run. The integer returned should follow the Unix
 	// convention, 0 for "good", "1" for help text requested, and anything else
-	// for "bad" or "other".
+	// for "bad" or "other". Of course, you can always os.Exit(n) yourself too.
 	Func func(cli *rootCLI) int
 
 	// Args is where the remaining arguments from the command line will reside.

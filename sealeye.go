@@ -88,10 +88,10 @@ func runSubcommand(parent interface{}, name string, cli interface{}, args []stri
 	reflectFunc = func(reflectType reflect.Type) {
 		for i := 0; i < reflectType.NumField(); i++ {
 			reflectField := reflectType.Field(i)
+			if reflectField.Type.Kind() == reflect.Struct {
+				reflectFunc(reflectField.Type)
+			}
 			if !ast.IsExported(reflectField.Name) {
-				if reflectField.Type.Kind() == reflect.Struct {
-					reflectFunc(reflectField.Type)
-				}
 				continue
 			}
 			optionTag := reflectField.Tag.Get("option")
@@ -212,11 +212,11 @@ func runSubcommand(parent interface{}, name string, cli interface{}, args []stri
 			if blankLinePending || len(optionHelpNames) > 1 {
 				optionHelpData = append(optionHelpData, nil)
 			}
-			helpText := reflectField.Tag.Get("help")
+			optionHelpText := reflectField.Tag.Get("help")
 			if len(defaultsHelp) > 0 {
-				helpText += " Default: " + strings.Join(defaultsHelp, ", ")
+				optionHelpText += " Default: " + strings.Join(defaultsHelp, ", ")
 			}
-			optionHelpData = append(optionHelpData, []string{"", strings.Join(optionHelpNames, "\n"), helpText})
+			optionHelpData = append(optionHelpData, []string{"", strings.Join(optionHelpNames, "\n"), optionHelpText})
 			blankLinePending = len(optionHelpNames) > 1
 		}
 	}
@@ -290,7 +290,7 @@ func runSubcommand(parent interface{}, name string, cli interface{}, args []stri
 	// Output the full help text, if asked.
 	helpFunc := func() {
 		var color bool
-		if colorOption := reflectValue.FieldByName("Color"); colorOption.Kind() == reflect.Bool {
+		if colorOption := resolveOption(reflectValue, "Color"); colorOption.Kind() == reflect.Bool {
 			color = colorOption.Bool()
 		} else {
 			color = isatty.IsTerminal(os.Stdout.Fd())
@@ -300,7 +300,6 @@ func runSubcommand(parent interface{}, name string, cli interface{}, args []stri
 		alignOptions.RowSecondUD = "    "
 		alignOptions.RowUD = "  "
 		alignOptions.Widths = []int{4, 0, brimtext.GetTTYWidth() - maxOptionLen - 7}
-		alignOptions.Alignments = []brimtext.Alignment{brimtext.Left, brimtext.Right, brimtext.Left}
 		if len(optionHelpData) > 0 {
 			fmt.Println()
 			fmt.Println("Options:")
@@ -342,4 +341,18 @@ func runSubcommand(parent interface{}, name string, cli interface{}, args []stri
 		helpFunc()
 	}
 	os.Exit(exitCode)
+}
+
+func resolveOption(reflectValue reflect.Value, name string) reflect.Value {
+	if reflectValue.Kind() == reflect.Invalid {
+		return reflectValue
+	}
+	if reflectValue.Kind() == reflect.Ptr {
+		reflectValue = reflectValue.Elem()
+	}
+	rv := reflectValue.FieldByName(name)
+	if rv.Kind() == reflect.Invalid {
+		rv = resolveOption(reflectValue.FieldByName("Parent"), name)
+	}
+	return rv
 }
