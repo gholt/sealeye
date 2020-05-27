@@ -55,7 +55,15 @@ func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name s
 		reflectValue = reflectValue.Elem()
 	}
 	if parentField := reflectValue.FieldByName("Parent"); parentField.Kind() != reflect.Invalid {
-		parentField.Set(reflect.ValueOf(parent))
+		var parentValue reflect.Value
+		for {
+			if parentValue.Kind() == reflect.Interface || parentValue.Kind() == reflect.Ptr {
+				parentValue = parentValue.Elem()
+			} else {
+				break
+			}
+		}
+		parentField.Set(reflect.ValueOf(parentValue))
 	}
 
 	// Establish the subcommands map.
