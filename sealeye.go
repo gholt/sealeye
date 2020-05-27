@@ -55,15 +55,7 @@ func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name s
 		reflectValue = reflectValue.Elem()
 	}
 	if parentField := reflectValue.FieldByName("Parent"); parentField.Kind() != reflect.Invalid {
-		var parentValue reflect.Value
-		for {
-			if parentValue.Kind() == reflect.Interface || parentValue.Kind() == reflect.Ptr {
-				parentValue = parentValue.Elem()
-			} else {
-				break
-			}
-		}
-		parentField.Set(reflect.ValueOf(parentValue))
+		parentField.Set(reflect.ValueOf(parent))
 	}
 
 	// Establish the subcommands map.
@@ -89,11 +81,30 @@ func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name s
 	}
 	helpText = helpBuilder.String()
 
-	// Parse out the options and their types. We just record the option types
-	// as strings like, "bool", "int", etc. for simplicity as this really isn't
-	// going to be a performance choke point.
+	// Parse out the options and their types and requirements. We just record
+	// the option types as strings like, "bool", "int", etc. for simplicity as
+	// this really isn't going to be a performance choke point.
 	optionTypes := map[string]string{}
 	optionValues := map[string]reflect.Value{}
+	optionReqs := map[string]map[string]bool{}
+	reqCheck := func(optionName, value string) error {
+		if optionReqs[optionName]["dir"] {
+			if fi, err := os.Stat(value); err != nil || !fi.IsDir() {
+				return fmt.Errorf("%s %q is not a directory", optionName, value)
+			}
+		}
+		if optionReqs[optionName]["dirorfile"] {
+			if _, err := os.Stat(value); err != nil {
+				return fmt.Errorf("%s %q is not a directory or file", optionName, value)
+			}
+		}
+		if optionReqs[optionName]["file"] {
+			if fi, err := os.Stat(value); err != nil || fi.IsDir() {
+				return fmt.Errorf("%s %q is not a file", optionName, value)
+			}
+		}
+		return nil
+	}
 	// Also, parse out the option help data, which is a table of each option
 	// and its help text.
 	var optionHelpData [][]string
@@ -148,6 +159,20 @@ func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name s
 					defaultsHelp = append(defaultsHelp, dflt)
 				}
 			}
+			var reqsHelp []string
+			for _, req := range strings.Split(reflectField.Tag.Get("required"), ",") {
+				switch req {
+				case "":
+				case "dir":
+					reqsHelp = append(reqsHelp, "must be a directory")
+				case "dirorfile":
+					reqsHelp = append(reqsHelp, "must be a directory or file")
+				case "file":
+					reqsHelp = append(reqsHelp, "must be a file")
+				default:
+					panic(fmt.Sprintf("unknown required value: %q", req))
+				}
+			}
 			var optionHelpNames []string
 			for _, optionName := range strings.Split(optionTag, ",") {
 				if optionName != "" {
@@ -172,6 +197,16 @@ func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name s
 					optionHelpNames = append(optionHelpNames, optionHelpName)
 					optionTypes[optionName] = optionType
 					optionValues[optionName] = reflectValue.FieldByName(reflectField.Name)
+					optionReqs[optionName] = map[string]bool{}
+					for _, req := range strings.Split(reflectField.Tag.Get("required"), ",") {
+						switch req {
+						case "":
+						case "dir", "dirorfile", "file":
+							optionReqs[optionName][req] = true
+						default:
+							panic(fmt.Sprintf("unknown required value: %q", req))
+						}
+					}
 				DEFAULTING:
 					for _, dflt := range strings.Split(reflectField.Tag.Get("default"), ",") {
 						if dflt == "" {
@@ -194,6 +229,10 @@ func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name s
 									}
 									optionValues[optionName].SetInt(i)
 								case "string":
+									if err := reqCheck(optionName, env); err != nil {
+										fmt.Fprintln(stderr, err)
+										return 1
+									}
 									optionValues[optionName].SetString(env)
 								default:
 									panic(fmt.Sprintln("sealeye programmer error", optionType))
@@ -227,6 +266,10 @@ func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name s
 								}
 								optionValues[optionName].SetInt(i)
 							case "string":
+								if err := reqCheck(optionName, dflt); err != nil {
+									fmt.Fprintln(stderr, err)
+									return 1
+								}
 								optionValues[optionName].SetString(dflt)
 							default:
 								panic(fmt.Sprintln("sealeye programmer error", optionType))
@@ -237,6 +280,9 @@ func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name s
 				}
 			}
 			optionHelpText := reflectField.Tag.Get("help")
+			if len(reqsHelp) > 0 {
+				optionHelpText += " Requirements: " + strings.Join(reqsHelp, ", ")
+			}
 			if len(defaultsHelp) > 0 {
 				optionHelpText += " Default: " + strings.Join(defaultsHelp, ", ")
 			}
@@ -328,6 +374,10 @@ func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name s
 					return 1
 				}
 				i++
+				if err := reqCheck(arg, args[i]); err != nil {
+					fmt.Fprintln(stderr, err)
+					return 1
+				}
 				optionValues[arg].SetString(args[i])
 			default:
 				if strings.HasPrefix(arg, "--no-") {
