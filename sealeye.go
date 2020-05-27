@@ -3,7 +3,7 @@
 // See sealeye-example for complete examples of all the features, but a quick
 // summary:
 //
-//  * Short options "-s" and long options "--long".
+//  * Short options "-s" and long options "--long", with fallback to "-long" to support Go-like flags.
 //  * Multiple option names per option.
 //  * Boolean options can be flipped with "no" prefixing the long name, e.g. "--no-color".
 //  * Environment variable defaults support.
@@ -11,21 +11,21 @@
 //    the option's value if the user set it, or the COUNT environment variable
 //    if that was set, or finally the plain value of 123 if all else failed.
 //  * Subcommands using the exact same structures.
+//  * Options grouping, for DRY reuse, by simple struct embedding.
 //  * Markdown support for help text, reformatting to fit the terminal and using color if possible.
+//  * Support for an --all-help option to output all help for all subcommands.
 //
 // Things To Be Done Still:
 //
-//  * Clean up help text for options that override embedded struct options.
-//  * Make an --all-help option to output all help for all subcommands.
 //  * Support for other types: floats, times, durations, maybe lists.
 //  * Handle --option=value format.
 //  * Handle -abc to be the equivalent of -a -b -c but only for short options.
-//  * Whatever other obvious stuff I'm forgetting because my brain is fried.
 package sealeye
 
 import (
 	"fmt"
 	"go/ast"
+	"io"
 	"os"
 	"reflect"
 	"sort"
@@ -42,14 +42,13 @@ import (
 // command variable is named "root" this would be your main function:
 //
 //  func main() {
-//      // This should be all you need for your main function.
 //  	sealeye.Run(root)
 //  }
 func Run(cli interface{}) {
-	runSubcommand(nil, os.Args[0], cli, os.Args[1:])
+	os.Exit(runSubcommand(os.Stdout, os.Stderr, nil, os.Args[0], cli, os.Args[1:]))
 }
 
-func runSubcommand(parent interface{}, name string, cli interface{}, args []string) {
+func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name string, cli interface{}, args []string) int {
 	// Reflect down the value itself.
 	reflectValue := reflect.ValueOf(cli)
 	if reflectValue.Kind() == reflect.Ptr {
@@ -63,33 +62,44 @@ func runSubcommand(parent interface{}, name string, cli interface{}, args []stri
 	var helpText string
 	helpTemplate, err := template.New("help").Parse(reflectValue.FieldByName("Help").String())
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Could not parse help text %q", reflectValue.FieldByName("Help").String())
+		fmt.Fprintf(stderr, "Could not parse help text %q", reflectValue.FieldByName("Help").String())
 		panic(err)
 	}
 	var helpBuilder strings.Builder
 	if err := helpTemplate.Execute(&helpBuilder, map[string]interface{}{"Command": name}); err != nil {
-		fmt.Fprintf(os.Stderr, "Could not parse help text %q", reflectValue.FieldByName("Help").String())
+		fmt.Fprintf(stderr, "Could not parse help text %q", reflectValue.FieldByName("Help").String())
 		panic(err)
 	}
 	helpText = helpBuilder.String()
 
 	// Parse out the options and their types. We just record the option types
 	// as strings like, "bool", "int", etc. for simplicity as this really isn't
-	// going to be a choke point.
+	// going to be a performance choke point.
 	optionTypes := map[string]string{}
 	optionValues := map[string]reflect.Value{}
 	// Also, parse out the option help data, which is a table of each option
 	// and its help text.
 	var optionHelpData [][]string
+	var multilineOptionHelpData [][]string
 	maxOptionLen := 0
-	blankLinePending := false
 	tty := 0
-	var reflectFunc func(reflectType reflect.Type)
-	reflectFunc = func(reflectType reflect.Type) {
+	topFields := map[string]bool{}
+	for i := 0; i < reflectValue.Type().NumField(); i++ {
+		topFields[reflectValue.Type().Field(i).Name] = true
+	}
+	var reflectFunc func(reflectType reflect.Type, embeddedStruct bool) int
+	reflectFunc = func(reflectType reflect.Type, embeddedStruct bool) int {
 		for i := 0; i < reflectType.NumField(); i++ {
 			reflectField := reflectType.Field(i)
 			if reflectField.Type.Kind() == reflect.Struct {
-				reflectFunc(reflectField.Type)
+				if code := reflectFunc(reflectField.Type, true); code != 0 {
+					return code
+				}
+			}
+			// Skip fields in embedded structs that are overridden by the top
+			// level struct.
+			if embeddedStruct && topFields[reflectField.Name] {
+				continue
 			}
 			if !ast.IsExported(reflectField.Name) {
 				continue
@@ -155,15 +165,15 @@ func runSubcommand(parent interface{}, name string, cli interface{}, args []stri
 								case "bool":
 									b, err := strconv.ParseBool(env)
 									if err != nil {
-										fmt.Fprintf(os.Stderr, "invalid boolean %q for option %q via $%s\n", env, optionName, dflt[len("env:"):])
-										os.Exit(1)
+										fmt.Fprintf(stderr, "invalid boolean %q for option %q via $%s\n", env, optionName, dflt[len("env:"):])
+										return 1
 									}
 									optionValues[optionName].SetBool(b)
 								case "int":
 									i, err := strconv.ParseInt(env, 10, 64)
 									if err != nil {
-										fmt.Fprintf(os.Stderr, "invalid integer %q for option %q via $%s\n", env, optionName, dflt[len("env:"):])
-										os.Exit(1)
+										fmt.Fprintf(stderr, "invalid integer %q for option %q via $%s\n", env, optionName, dflt[len("env:"):])
+										return 1
 									}
 									optionValues[optionName].SetInt(i)
 								case "string":
@@ -175,7 +185,7 @@ func runSubcommand(parent interface{}, name string, cli interface{}, args []stri
 							}
 						} else if dflt == "terminal" {
 							if tty == 0 {
-								if isatty.IsTerminal(os.Stdout.Fd()) {
+								if isatty.IsTerminal(stdout.Fd()) {
 									tty = 1
 								} else {
 									tty = -1
@@ -209,18 +219,29 @@ func runSubcommand(parent interface{}, name string, cli interface{}, args []stri
 					}
 				}
 			}
-			if blankLinePending || len(optionHelpNames) > 1 {
-				optionHelpData = append(optionHelpData, nil)
-			}
 			optionHelpText := reflectField.Tag.Get("help")
 			if len(defaultsHelp) > 0 {
 				optionHelpText += " Default: " + strings.Join(defaultsHelp, ", ")
 			}
-			optionHelpData = append(optionHelpData, []string{"", strings.Join(optionHelpNames, "\n"), optionHelpText})
-			blankLinePending = len(optionHelpNames) > 1
+			if len(optionHelpNames) == 1 {
+				optionHelpData = append(optionHelpData, []string{"", optionHelpNames[0], optionHelpText})
+			} else {
+				if optionType == "bool" {
+					if s := strings.Join(optionHelpNames, " "); len(s) < 15 {
+						optionHelpData = append(optionHelpData, []string{"", s, optionHelpText})
+					} else {
+						multilineOptionHelpData = append(multilineOptionHelpData, []string{"", strings.Join(optionHelpNames, "\n"), optionHelpText})
+					}
+				} else {
+					multilineOptionHelpData = append(multilineOptionHelpData, []string{"", strings.Join(optionHelpNames, "\n"), optionHelpText})
+				}
+			}
 		}
+		return 0
 	}
-	reflectFunc(reflectValue.Type())
+	if code := reflectFunc(reflectValue.Type(), false); code != 0 {
+		return code
+	}
 
 	// Scan the command line for options and remaining args, possibly switching
 	// context to a subcommand.
@@ -232,38 +253,67 @@ func runSubcommand(parent interface{}, name string, cli interface{}, args []stri
 			subcommands = nil
 		}
 	}
+	// noMore will be set true if we encounter a "--" alone; conventionally
+	// means "no more options follow".
 	noMore := false
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		addArg := func() {
+		addArg := func() (bool, int) {
 			if subcommand, ok := subcommands[arg]; ok {
-				runSubcommand(cli, name+" "+arg, subcommand, args[i+1:])
+				return true, runSubcommand(stdout, stderr, cli, name+" "+arg, subcommand, args[i+1:])
 			}
 			remainingArgs = append(remainingArgs, arg)
+			return false, 0
 		}
 		if noMore {
-			addArg()
+			if ret, code := addArg(); ret {
+				return code
+			}
+			continue
 		}
 		if len(arg) > 0 && arg[0] == '-' {
-			switch optionTypes[arg] {
+			optionType, ok := optionTypes[arg]
+			if !ok {
+				// If we didn't find a match for the option, and it begins with
+				// just a single dash, try it with a double-dash for backward
+				// compatibility with Go's flag library which allows options
+				// like -version to mean the more standard --version option.
+				//
+				// GLH: Note that this will have tension with treating -abc as
+				// if it were -a -b -c as is standard with most CLIs. When code
+				// is added to try to "explode" such aggregate short options,
+				// it should take precedence over this code trying to treat it
+				// as an --abc long option.
+				if len(arg) > 1 && arg[1] != '-' {
+					arg = "-" + arg
+					optionType, ok = optionTypes[arg]
+				}
+				// If still didn't find a match for the option, and it happens
+				// to be --all-help, just pretend it was --help.
+				if !ok && arg == "--all-help" {
+					arg = "--help"
+					optionType = optionTypes[arg]
+				}
+			}
+			switch optionType {
 			case "bool":
 				optionValues[arg].SetBool(true)
 			case "int":
 				if len(args) == i+1 {
-					fmt.Fprintf(os.Stderr, "no value given for option %q\n", arg)
-					os.Exit(1)
+					fmt.Fprintf(stderr, "no value given for option %q\n", arg)
+					return 1
 				}
 				i++
 				v, err := strconv.ParseInt(args[i], 10, 64)
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "invalid int %q for option %q\n", args[i], arg)
-					os.Exit(1)
+					fmt.Fprintf(stderr, "invalid int %q for option %q\n", args[i], arg)
+					return 1
 				}
 				optionValues[arg].SetInt(v)
 			case "string":
 				if len(args) == i+1 {
-					fmt.Fprintf(os.Stderr, "no value given for option %q\n", arg)
-					os.Exit(1)
+					fmt.Fprintf(stderr, "no value given for option %q\n", arg)
+					return 1
 				}
 				i++
 				optionValues[arg].SetString(args[i])
@@ -275,14 +325,15 @@ func runSubcommand(parent interface{}, name string, cli interface{}, args []stri
 						break
 					}
 				}
-				fmt.Fprintf(os.Stderr, "unknown option %q\n", arg)
-				os.Exit(1)
+				fmt.Fprintf(stderr, "unknown option %q\n", arg)
+				return 1
 			}
 		} else if arg == "--" {
-			addArg()
 			noMore = true
 		} else {
-			addArg()
+			if ret, code := addArg(); ret {
+				return code
+			}
 		}
 	}
 	reflectValue.FieldByName("Args").Set(reflect.ValueOf(remainingArgs))
@@ -293,14 +344,36 @@ func runSubcommand(parent interface{}, name string, cli interface{}, args []stri
 		if colorOption := resolveOption(reflectValue, "Color"); colorOption.Kind() == reflect.Bool {
 			color = colorOption.Bool()
 		} else {
-			color = isatty.IsTerminal(os.Stdout.Fd())
+			color = isatty.IsTerminal(stdout.Fd())
 		}
-		_, _ = os.Stdout.Write(blackfridaytext.MarkdownToTextNoMetadata([]byte(helpText), &blackfridaytext.Options{Color: color, TableAlignOptions: brimtext.NewUnicodeBoxedAlignOptions()}))
+		_, _ = stdout.Write(blackfridaytext.MarkdownToTextNoMetadata([]byte(helpText), &blackfridaytext.Options{Color: color, TableAlignOptions: brimtext.NewUnicodeBoxedAlignOptions()}))
 		alignOptions := brimtext.NewDefaultAlignOptions()
 		alignOptions.RowSecondUD = "    "
 		alignOptions.RowUD = "  "
-		alignOptions.Widths = []int{4, 0, brimtext.GetTTYWidth() - maxOptionLen - 7}
-		if len(optionHelpData) > 0 {
+		alignOptions.Widths = []int{4, 0, brimtext.GetTTYWidth() - maxOptionLen - 8}
+		if len(optionHelpData) > 0 || len(multilineOptionHelpData) > 0 {
+			// Sort help and all-help to the top, dictionary order after that.
+			sort.Slice(optionHelpData, func(i, j int) bool {
+				si := strings.ToLower(strings.TrimLeft(optionHelpData[i][1], "-"))
+				if si[0] == '?' {
+					return true
+				}
+				sj := strings.ToLower(strings.TrimLeft(optionHelpData[j][1], "-"))
+				if si == "all-help" {
+					return sj[0] != '?'
+				}
+				if sj == "all-help" {
+					return false
+				}
+				return si < sj
+			})
+			// Sort all multiline options in dictionary order.
+			sort.Slice(multilineOptionHelpData, func(i, j int) bool {
+				return multilineOptionHelpData[i][1] < multilineOptionHelpData[j][1]
+			})
+			for _, helpData := range multilineOptionHelpData {
+				optionHelpData = append(optionHelpData, nil, helpData)
+			}
 			fmt.Println()
 			fmt.Println("Options:")
 			fmt.Print(brimtext.Align(optionHelpData, alignOptions))
@@ -330,9 +403,26 @@ func runSubcommand(parent interface{}, name string, cli interface{}, args []stri
 			fmt.Print(brimtext.Align(subcommandHelpData, alignOptions))
 		}
 	}
+	if allHelpOption := reflectValue.FieldByName("AllHelpOption"); allHelpOption.Kind() == reflect.Bool && allHelpOption.Bool() {
+		helpFunc()
+		var subcommandNames []string
+		for subcommandName := range subcommands {
+			subcommandNames = append(subcommandNames, subcommandName)
+		}
+		sort.Strings(subcommandNames)
+		for _, subcommandName := range subcommandNames {
+			s := "---[ " + name + " " + subcommandName + " ]"
+			fmt.Fprintln(stdout)
+			fmt.Fprint(stdout, s)
+			fmt.Fprintln(stdout, strings.Repeat("-", brimtext.GetTTYWidth()-len(s)-1))
+			fmt.Fprintln(stdout)
+			runSubcommand(stdout, stderr, cli, name+" "+subcommandName, subcommands[subcommandName], []string{"--all-help"})
+		}
+		return 1
+	}
 	if helpOption := reflectValue.FieldByName("HelpOption"); helpOption.Kind() == reflect.Bool && helpOption.Bool() {
 		helpFunc()
-		os.Exit(1)
+		return 1
 	}
 
 	// Actually Run!
@@ -340,7 +430,7 @@ func runSubcommand(parent interface{}, name string, cli interface{}, args []stri
 	if exitCode == 1 {
 		helpFunc()
 	}
-	os.Exit(exitCode)
+	return exitCode
 }
 
 func resolveOption(reflectValue reflect.Value, name string) reflect.Value {
@@ -355,4 +445,9 @@ func resolveOption(reflectValue reflect.Value, name string) reflect.Value {
 		rv = resolveOption(reflectValue.FieldByName("Parent"), name)
 	}
 	return rv
+}
+
+type fdWriter interface {
+	io.Writer
+	Fd() uintptr
 }

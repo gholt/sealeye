@@ -14,6 +14,8 @@ func main() {
 // rootCLI is the defining struct for the command; see below where the "var
 // root" is set for an actual instance.
 type rootCLI struct {
+	commonOptions // Embedded struct for reuseable option definitions.
+
 	// Help is what will output at the top of the help output, e.g.
 	// "sealeye-example --help". Any instances of {{.Command}} will be replaced
 	// with the name of the calling executable, e.g. "sealeye-example" or, if a
@@ -41,6 +43,9 @@ type rootCLI struct {
 	// HelpOption should usually be included as users always need help. If you
 	// include this option, it will automatically be handled by sealeye.
 	HelpOption bool `option:"?,h,help" help:"Outputs this help text."`
+	// AllHelpOption should also usually be included. If you do include it, be
+	// sure to include it for all subcommands that also have subcommands.
+	AllHelpOption bool `option:"all-help" help:"Outputs this help text and the help text for all subcommands."`
 
 	// Color should usually be included so users can toggle color output if
 	// needed. Sealeye tries to guess what the user would want, but the option

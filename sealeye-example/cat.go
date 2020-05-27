@@ -11,9 +11,16 @@ func init() {
 }
 
 type catCLI struct {
-	// sprinkles shows how to have a reusable set of options; see sprinkles.go
-	// and also version.go where sprinkles are also embedded.
-	sprinkles
+	// Embedded structs for reuseable option definitions; defined in common.go
+	// and sprinkles.go -- this shows how you can embed multiple structs with
+	// no problem.
+	//
+	// Also note that down below we will override one of the sprinkle options,
+	// SprinkleType, with example code way below on how to work between the two
+	// levels.
+	commonOptions
+	sprinkleOptions
+
 	Help string
 	// QuickHelp should be a quick sentence or two that will be displayed in
 	// the parent's list of subcommands.
@@ -47,7 +54,7 @@ This example program will just output the content of the filename or filenames.
 	Func: func(cli *catCLI) int {
 		// This is here because we overrode the embedded sprinkles option, but
 		// we still want to use it's reusable method, sprinkle().
-		cli.sprinkles.SprinkleType = cli.SprinkleType
+		cli.sprinkleOptions.SprinkleType = cli.SprinkleType
 		if len(cli.Args) == 0 {
 			return 1
 		}

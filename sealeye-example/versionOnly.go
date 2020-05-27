@@ -7,6 +7,7 @@ func init() {
 }
 
 type versionOnlyCLI struct {
+	commonOptions
 	Help       string
 	QuickHelp  string
 	Func       func(cli *versionOnlyCLI) int

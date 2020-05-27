@@ -7,14 +7,18 @@ func init() {
 }
 
 type versionCLI struct {
-	// sprinkles shows how to have a reusable set of options; see sprinkles.go
-	// and also cat.go where sprinkles are also embedded.
-	sprinkles
-	Help       string
-	QuickHelp  string
-	Func       func(cli *versionCLI) int
-	Args       []string
-	HelpOption bool `option:"?,h,help" help:"Outputs this help text."`
+	// Embedded structs for reuseable option definitions; defined in common.go
+	// and sprinkles.go -- this shows how you can embed multiple structs with
+	// no problem.
+	commonOptions
+	sprinkleOptions
+
+	Help          string
+	QuickHelp     string
+	Func          func(cli *versionCLI) int
+	Args          []string
+	HelpOption    bool `option:"?,h,help" help:"Outputs this help text."`
+	AllHelpOption bool `option:"all-help" help:"Outputs this help text and the help text for all subcommands."`
 	// Silly example, but shows that subcommands can have subcommands; see
 	// versionOnly.go for the sub-subcommand.
 	Subcommands map[string]interface{}

@@ -2,12 +2,12 @@ package main
 
 import "fmt"
 
-type sprinkles struct {
+type sprinkleOptions struct {
 	SprinkleType  int `option:"sprinkle-type" help:"The type of sprinkles to output."`
 	SprinkleCount int `option:"sprinkle-count" help:"The number of sprinkles to output." default:"10"`
 }
 
-func (s sprinkles) sprinkle() {
+func (s sprinkleOptions) sprinkle() {
 	switch s.SprinkleType {
 	case 1:
 		for i := 0; i < s.SprinkleCount; i++ {
