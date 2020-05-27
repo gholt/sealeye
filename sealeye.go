@@ -58,6 +58,15 @@ func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name s
 		parentField.Set(reflect.ValueOf(parent))
 	}
 
+	// Establish the subcommands map.
+	var subcommands map[string]interface{}
+	if subcommandsField := reflectValue.FieldByName("Subcommands"); subcommandsField.Kind() != reflect.Invalid {
+		subcommands, _ = subcommandsField.Interface().(map[string]interface{})
+		if len(subcommands) == 0 {
+			subcommands = nil
+		}
+	}
+
 	// Parse out the overall help text -- the top part without the options.
 	var helpText string
 	helpTemplate, err := template.New("help").Parse(reflectValue.FieldByName("Help").String())
@@ -224,7 +233,9 @@ func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name s
 				optionHelpText += " Default: " + strings.Join(defaultsHelp, ", ")
 			}
 			if len(optionHelpNames) == 1 {
-				optionHelpData = append(optionHelpData, []string{"", optionHelpNames[0], optionHelpText})
+				if optionHelpNames[0] != "--all-help" || subcommands != nil {
+					optionHelpData = append(optionHelpData, []string{"", optionHelpNames[0], optionHelpText})
+				}
 			} else {
 				if optionType == "bool" {
 					if s := strings.Join(optionHelpNames, " "); len(s) < 15 {
@@ -246,13 +257,6 @@ func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name s
 	// Scan the command line for options and remaining args, possibly switching
 	// context to a subcommand.
 	var remainingArgs []string
-	var subcommands map[string]interface{}
-	if subcommandsField := reflectValue.FieldByName("Subcommands"); subcommandsField.Kind() != reflect.Invalid {
-		subcommands, _ = subcommandsField.Interface().(map[string]interface{})
-		if len(subcommands) == 0 {
-			subcommands = nil
-		}
-	}
 	// noMore will be set true if we encounter a "--" alone; conventionally
 	// means "no more options follow".
 	noMore := false
@@ -437,8 +441,12 @@ func resolveOption(reflectValue reflect.Value, name string) reflect.Value {
 	if reflectValue.Kind() == reflect.Invalid {
 		return reflectValue
 	}
-	if reflectValue.Kind() == reflect.Ptr {
-		reflectValue = reflectValue.Elem()
+	for {
+		if reflectValue.Kind() == reflect.Interface || reflectValue.Kind() == reflect.Ptr {
+			reflectValue = reflectValue.Elem()
+		} else {
+			break
+		}
 	}
 	rv := reflectValue.FieldByName(name)
 	if rv.Kind() == reflect.Invalid {
