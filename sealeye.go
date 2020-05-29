@@ -475,8 +475,10 @@ func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name s
 		}
 		sort.Strings(subcommandNames)
 		for _, subcommandName := range subcommandNames {
-			s := "---[ " + name + " " + subcommandName + " ]"
 			fmt.Fprintln(stdout)
+			fmt.Fprintln(stdout)
+			fmt.Fprintln(stdout)
+			s := "---[ " + name + " " + subcommandName + " ]"
 			fmt.Fprint(stdout, s)
 			fmt.Fprintln(stdout, strings.Repeat("-", brimtext.GetTTYWidth()-len(s)-1))
 			fmt.Fprintln(stdout)
