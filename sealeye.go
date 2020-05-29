@@ -139,7 +139,11 @@ func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name s
 				continue
 			}
 			var optionType string
-			switch reflectField.Type.Kind() {
+			eventualKind := reflectField.Type.Kind()
+			if eventualKind == reflect.Ptr {
+				eventualKind = reflectField.Type.Elem().Kind()
+			}
+			switch eventualKind {
 			case reflect.Bool:
 				optionType = "bool"
 			case reflect.Int:
@@ -222,20 +226,20 @@ func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name s
 										fmt.Fprintf(stderr, "invalid boolean %q for option %q via $%s\n", env, optionName, dflt[len("env:"):])
 										return 1
 									}
-									optionValues[optionName].SetBool(b)
+									setBool(optionValues[optionName], b)
 								case "int":
 									i, err := strconv.ParseInt(env, 10, 64)
 									if err != nil {
 										fmt.Fprintf(stderr, "invalid integer %q for option %q via $%s\n", env, optionName, dflt[len("env:"):])
 										return 1
 									}
-									optionValues[optionName].SetInt(i)
+									setInt(optionValues[optionName], i)
 								case "string":
 									if err := reqCheck(optionName, env); err != nil {
 										fmt.Fprintln(stderr, err)
 										return 1
 									}
-									optionValues[optionName].SetString(env)
+									setString(optionValues[optionName], env)
 								default:
 									panic(fmt.Sprintln("sealeye programmer error", optionType))
 								}
@@ -249,7 +253,7 @@ func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name s
 									tty = -1
 								}
 							}
-							optionValues[optionName].SetBool(tty == 1)
+							setBool(optionValues[optionName], tty == 1)
 							break DEFAULTING
 						} else {
 							switch optionType {
@@ -259,20 +263,20 @@ func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name s
 									panic(fmt.Sprintf("cannot handle default specification %q from %q: %s", dflt, reflectField.Tag.Get("default"), err))
 
 								}
-								optionValues[optionName].SetBool(b)
+								setBool(optionValues[optionName], b)
 							case "int":
 								i, err := strconv.ParseInt(dflt, 10, 64)
 								if err != nil {
 									panic(fmt.Sprintf("cannot handle default specification %q from %q: %s", dflt, reflectField.Tag.Get("default"), err))
 
 								}
-								optionValues[optionName].SetInt(i)
+								setInt(optionValues[optionName], i)
 							case "string":
 								if err := reqCheck(optionName, dflt); err != nil {
 									fmt.Fprintln(stderr, err)
 									return 1
 								}
-								optionValues[optionName].SetString(dflt)
+								setString(optionValues[optionName], dflt)
 							default:
 								panic(fmt.Sprintln("sealeye programmer error", optionType))
 							}
@@ -357,7 +361,7 @@ func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name s
 			}
 			switch optionType {
 			case "bool":
-				optionValues[arg].SetBool(true)
+				setBool(optionValues[arg], true)
 			case "int":
 				if len(args) == i+1 {
 					fmt.Fprintf(stderr, "no value given for option %q\n", arg)
@@ -369,7 +373,7 @@ func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name s
 					fmt.Fprintf(stderr, "invalid int %q for option %q\n", args[i], arg)
 					return 1
 				}
-				optionValues[arg].SetInt(v)
+				setInt(optionValues[arg], v)
 			case "string":
 				if len(args) == i+1 {
 					fmt.Fprintf(stderr, "no value given for option %q\n", arg)
@@ -380,12 +384,12 @@ func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name s
 					fmt.Fprintln(stderr, err)
 					return 1
 				}
-				optionValues[arg].SetString(args[i])
+				setString(optionValues[arg], args[i])
 			default:
 				if strings.HasPrefix(arg, "--no-") {
 					arg2 := "--" + arg[len("--no-"):]
 					if optionTypes[arg2] == "bool" {
-						optionValues[arg2].SetBool(false)
+						setBool(optionValues[arg2], false)
 						break
 					}
 				}
@@ -520,4 +524,28 @@ func resolveOption(reflectValue reflect.Value, name string) reflect.Value {
 type fdWriter interface {
 	io.Writer
 	Fd() uintptr
+}
+
+func setBool(reflectValue reflect.Value, value bool) {
+	if reflectValue.Type().Kind() == reflect.Ptr {
+		reflectValue.Set(reflect.ValueOf(&value))
+	} else {
+		reflectValue.SetBool(value)
+	}
+}
+
+func setInt(reflectValue reflect.Value, value int64) {
+	if reflectValue.Type().Kind() == reflect.Ptr {
+		reflectValue.Set(reflect.ValueOf(&value))
+	} else {
+		reflectValue.SetInt(value)
+	}
+}
+
+func setString(reflectValue reflect.Value, value string) {
+	if reflectValue.Type().Kind() == reflect.Ptr {
+		reflectValue.Set(reflect.ValueOf(&value))
+	} else {
+		reflectValue.SetString(value)
+	}
 }

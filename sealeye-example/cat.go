@@ -20,7 +20,12 @@ type catCLI struct {
 	commonOptions
 	sprinkleOptions
 
-	Filenames bool `option:"f,filenames" help:"Outputs filenames before each file."`
+	// Filenames is a pointer to a bool instead of just a bool. This is useful
+	// when you'd like to know whether an option was given a value at all.
+	//
+	// It isn't particularly useful in this example; I'll work on a better
+	// example later.
+	Filenames *bool `option:"f,filenames" help:"Outputs filenames before each file."`
 	// Prefix just shows a string option type with a default.
 	Prefix string `option:"p,prefix" help:"Prefix to output before each filename, if any." default:"## "`
 	// Count just shows that you can have multiple defaults. This will use the
@@ -73,7 +78,7 @@ This example program will just output the content of the filename or filenames.
 			fmt.Printf("We have %d files to output\n", len(cli.Args))
 		}
 		for _, arg := range cli.Args {
-			if cli.Filenames {
+			if cli.Filenames != nil && *cli.Filenames {
 				fmt.Print(cli.Prefix)
 				fmt.Println(arg)
 			}
