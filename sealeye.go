@@ -60,12 +60,19 @@ func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name s
 		}
 	}
 
-	// Establish the subcommands map.
+	// Establish the subcommands maps.
 	var subcommands map[string]interface{}
+	var hiddenSubcommands map[string]interface{}
 	if subcommandsField := reflectValue.FieldByName("Subcommands"); subcommandsField.Kind() != reflect.Invalid {
 		subcommands, _ = subcommandsField.Interface().(map[string]interface{})
 		if len(subcommands) == 0 {
 			subcommands = nil
+		}
+	}
+	if subcommandsField := reflectValue.FieldByName("HiddenSubcommands"); subcommandsField.Kind() != reflect.Invalid {
+		hiddenSubcommands, _ = subcommandsField.Interface().(map[string]interface{})
+		if len(hiddenSubcommands) == 0 {
+			hiddenSubcommands = nil
 		}
 	}
 
@@ -324,6 +331,9 @@ func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name s
 		arg := args[i]
 		addArg := func() (bool, int) {
 			if subcommand, ok := subcommands[arg]; ok {
+				return true, runSubcommand(stdout, stderr, cli, name+" "+arg, subcommand, args[i+1:])
+			}
+			if subcommand, ok := hiddenSubcommands[arg]; ok {
 				return true, runSubcommand(stdout, stderr, cli, name+" "+arg, subcommand, args[i+1:])
 			}
 			remainingArgs = append(remainingArgs, arg)

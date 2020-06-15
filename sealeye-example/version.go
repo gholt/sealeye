@@ -22,6 +22,10 @@ type versionCLI struct {
 	// Silly example, but shows that subcommands can have subcommands; see
 	// versionOnly.go for the sub-subcommand.
 	Subcommands map[string]interface{}
+	// Also, subcommands can be hidden from help text but still available like
+	// any other subcommand. This can be useful when deprecating an old
+	// subcommand, but leaving it around for backward compatibility.
+	HiddenSubcommands map[string]interface{}
 }
 
 var version = &versionCLI{
@@ -38,5 +42,6 @@ Outputs the program's version.
 		fmt.Println("Version 1.2.3")
 		return 0
 	},
-	Subcommands: map[string]interface{}{},
+	Subcommands:       map[string]interface{}{},
+	HiddenSubcommands: map[string]interface{}{},
 }
