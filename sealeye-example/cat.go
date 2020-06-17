@@ -39,6 +39,9 @@ type catCLI struct {
 	// string or an existing file. You can also use required:"dir" or
 	// "dirorfile".
 	HeaderFile string `option:"header-file" help:"A file to output before any other output." required:"file" default:"env:GLH"`
+	// Secret shows how to have an option that is hidden from the help output.
+	// This can be useful for deprecated options.
+	Secret bool `option:"secret" help:"Deprecated option." hidden:"true"`
 }
 
 func init() {

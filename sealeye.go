@@ -292,26 +292,28 @@ func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name s
 					}
 				}
 			}
-			optionHelpText := reflectField.Tag.Get("help")
-			if len(reqsHelp) > 0 {
-				optionHelpText += " Requirements: " + strings.Join(reqsHelp, ", ")
-			}
-			if len(defaultsHelp) > 0 {
-				optionHelpText += " Default: " + strings.Join(defaultsHelp, ", ")
-			}
-			if len(optionHelpNames) == 1 {
-				if optionHelpNames[0] != "--all-help" || subcommands != nil {
-					optionHelpData = append(optionHelpData, []string{"", optionHelpNames[0], optionHelpText})
+			if reflectField.Tag.Get("hidden") != "true" {
+				optionHelpText := reflectField.Tag.Get("help")
+				if len(reqsHelp) > 0 {
+					optionHelpText += " Requirements: " + strings.Join(reqsHelp, ", ")
 				}
-			} else {
-				if optionType == "bool" {
-					if s := strings.Join(optionHelpNames, " "); len(s) < 15 {
-						optionHelpData = append(optionHelpData, []string{"", s, optionHelpText})
+				if len(defaultsHelp) > 0 {
+					optionHelpText += " Default: " + strings.Join(defaultsHelp, ", ")
+				}
+				if len(optionHelpNames) == 1 {
+					if optionHelpNames[0] != "--all-help" || subcommands != nil {
+						optionHelpData = append(optionHelpData, []string{"", optionHelpNames[0], optionHelpText})
+					}
+				} else {
+					if optionType == "bool" {
+						if s := strings.Join(optionHelpNames, " "); len(s) < 15 {
+							optionHelpData = append(optionHelpData, []string{"", s, optionHelpText})
+						} else {
+							multilineOptionHelpData = append(multilineOptionHelpData, []string{"", strings.Join(optionHelpNames, "\n"), optionHelpText})
+						}
 					} else {
 						multilineOptionHelpData = append(multilineOptionHelpData, []string{"", strings.Join(optionHelpNames, "\n"), optionHelpText})
 					}
-				} else {
-					multilineOptionHelpData = append(multilineOptionHelpData, []string{"", strings.Join(optionHelpNames, "\n"), optionHelpText})
 				}
 			}
 		}
