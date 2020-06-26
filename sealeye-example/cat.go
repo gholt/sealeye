@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 )
 
 var cat = &catCLI{}
@@ -42,6 +43,8 @@ type catCLI struct {
 	// Secret shows how to have an option that is hidden from the help output.
 	// This can be useful for deprecated options.
 	Secret bool `option:"secret" help:"Deprecated option." hidden:"true"`
+	// Delay shows that time.Duration is a valid option type.
+	Delay time.Duration `option:"delay" help:"Delay between files output. Use durations like \"10s\" or \"5m\"." default:"1s"`
 }
 
 func init() {
@@ -80,7 +83,13 @@ This example program will just output the content of the filename or filenames.
 		if cli.Parent.(*rootCLI).Debug {
 			fmt.Printf("We have %d files to output\n", len(cli.Args))
 		}
+		first := true
 		for _, arg := range cli.Args {
+			if first {
+				first = false
+			} else {
+				time.Sleep(cli.Delay)
+			}
 			if cli.Filenames != nil && *cli.Filenames {
 				fmt.Print(cli.Prefix)
 				fmt.Println(arg)

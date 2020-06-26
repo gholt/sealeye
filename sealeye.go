@@ -32,6 +32,7 @@ import (
 	"strconv"
 	"strings"
 	"text/template"
+	"time"
 
 	"github.com/gholt/blackfridaytext"
 	"github.com/gholt/brimtext"
@@ -146,19 +147,24 @@ func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name s
 				continue
 			}
 			var optionType string
-			eventualKind := reflectField.Type.Kind()
-			if eventualKind == reflect.Ptr {
-				eventualKind = reflectField.Type.Elem().Kind()
-			}
-			switch eventualKind {
-			case reflect.Bool:
-				optionType = "bool"
-			case reflect.Int:
-				optionType = "int"
-			case reflect.String:
-				optionType = "string"
+			switch reflectField.Type {
+			case reflect.TypeOf(time.Duration(0)):
+				optionType = "duration"
 			default:
-				panic(fmt.Sprintln("cannot handle", reflectField.Name, reflectField.Type.Kind()))
+				eventualKind := reflectField.Type.Kind()
+				if eventualKind == reflect.Ptr {
+					eventualKind = reflectField.Type.Elem().Kind()
+				}
+				switch eventualKind {
+				case reflect.Bool:
+					optionType = "bool"
+				case reflect.Int:
+					optionType = "int"
+				case reflect.String:
+					optionType = "string"
+				default:
+					panic(fmt.Sprintln("cannot handle", reflectField.Type, reflectField.Name, reflectField.Type.Kind()))
+				}
 			}
 			var defaultsHelp []string
 			for _, dflt := range strings.Split(reflectField.Tag.Get("default"), ",") {
@@ -196,13 +202,15 @@ func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name s
 					}
 					optionHelpName := optionName
 					switch optionType {
+					case "duration":
+						optionHelpName += " d"
 					case "bool":
 					case "int":
 						optionHelpName += " n"
 					case "string":
 						optionHelpName += " s"
 					default:
-						panic(fmt.Sprintln("sealeye programmer error", optionType))
+						panic(fmt.Sprintln("sealeye programmer error [1]", optionType))
 					}
 					if len(optionHelpName) > maxOptionLen {
 						maxOptionLen = len(optionHelpName)
@@ -227,6 +235,13 @@ func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name s
 						} else if strings.HasPrefix(dflt, "env:") {
 							if env, ok := os.LookupEnv(dflt[len("env:"):]); ok {
 								switch optionType {
+								case "duration":
+									d, err := time.ParseDuration(env)
+									if err != nil {
+										fmt.Fprintf(stderr, "invalid duration %q for option %q via $%s\n", env, optionName, dflt[len("env:"):])
+										return 1
+									}
+									setDuration(optionValues[optionName], d)
 								case "bool":
 									b, err := strconv.ParseBool(env)
 									if err != nil {
@@ -248,7 +263,7 @@ func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name s
 									}
 									setString(optionValues[optionName], env)
 								default:
-									panic(fmt.Sprintln("sealeye programmer error", optionType))
+									panic(fmt.Sprintln("sealeye programmer error [2]", optionType))
 								}
 								break DEFAULTING
 							}
@@ -264,6 +279,13 @@ func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name s
 							break DEFAULTING
 						} else {
 							switch optionType {
+							case "duration":
+								d, err := time.ParseDuration(dflt)
+								if err != nil {
+									panic(fmt.Sprintf("cannot handle default specification %q from %q: %s", dflt, reflectField.Tag.Get("default"), err))
+
+								}
+								setDuration(optionValues[optionName], d)
 							case "bool":
 								b, err := strconv.ParseBool(dflt)
 								if err != nil {
@@ -285,7 +307,7 @@ func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name s
 								}
 								setString(optionValues[optionName], dflt)
 							default:
-								panic(fmt.Sprintln("sealeye programmer error", optionType))
+								panic(fmt.Sprintln("sealeye programmer error [3]", optionType))
 							}
 							break DEFAULTING
 						}
@@ -372,6 +394,18 @@ func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name s
 				}
 			}
 			switch optionType {
+			case "duration":
+				if len(args) == i+1 {
+					fmt.Fprintf(stderr, "no value given for option %q\n", arg)
+					return 1
+				}
+				i++
+				d, err := time.ParseDuration(args[i])
+				if err != nil {
+					fmt.Fprintf(stderr, "invalid duration %q for option %q\n", args[i], arg)
+					return 1
+				}
+				setDuration(optionValues[arg], d)
 			case "bool":
 				setBool(optionValues[arg], true)
 			case "int":
@@ -536,6 +570,14 @@ func resolveOption(reflectValue reflect.Value, name string) reflect.Value {
 type fdWriter interface {
 	io.Writer
 	Fd() uintptr
+}
+
+func setDuration(reflectValue reflect.Value, value time.Duration) {
+	if reflectValue.Type().Kind() == reflect.Ptr {
+		reflectValue.Set(reflect.ValueOf(&value))
+	} else {
+		reflectValue.Set(reflect.ValueOf(value))
+	}
 }
 
 func setBool(reflectValue reflect.Value, value bool) {
