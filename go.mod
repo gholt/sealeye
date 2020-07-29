@@ -1,6 +1,6 @@
 module github.com/gholt/sealeye
 
-go 1.13
+go 1.14
 
 require (
 	github.com/gholt/blackfridaytext v0.0.0-20190816214545-16f7b9b9742e

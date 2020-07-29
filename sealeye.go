@@ -39,7 +39,7 @@ import (
 	"github.com/mattn/go-isatty"
 )
 
-// Run is the top-level sealeye handler. Usually, assumming your top-level
+// Run is the top-level sealeye handler. Usually, assuming your top-level
 // command variable is named "root" this would be your main function:
 //
 //  func main() {
@@ -49,7 +49,16 @@ func Run(cli interface{}) {
 	os.Exit(runSubcommand(os.Stdout, os.Stderr, nil, os.Args[0], cli, os.Args[1:]))
 }
 
-func runSubcommand(stdout fdWriter, stderr io.Writer, parent interface{}, name string, cli interface{}, args []string) int {
+// RunAdvanced is much like Run except that you can specify stdout, stderr, and
+// the executable name and arguments yourself. Useful for tests, or an
+// interactive shell that calls various embedded CLIs, etc. Additionally,
+// RunAdvanced will not call os.Exit but will instead return the exit code to
+// you.
+func RunAdvanced(stdout FDWriter, stderr io.Writer, name string, cli interface{}, args []string) int {
+	return runSubcommand(stdout, stderr, nil, name, cli, args)
+}
+
+func runSubcommand(stdout FDWriter, stderr io.Writer, parent interface{}, name string, cli interface{}, args []string) int {
 	// Reflect down the value itself.
 	reflectValue := reflect.ValueOf(cli)
 	if reflectValue.Kind() == reflect.Ptr {
@@ -567,7 +576,7 @@ func resolveOption(reflectValue reflect.Value, name string) reflect.Value {
 	return rv
 }
 
-type fdWriter interface {
+type FDWriter interface {
 	io.Writer
 	Fd() uintptr
 }
@@ -590,7 +599,12 @@ func setBool(reflectValue reflect.Value, value bool) {
 
 func setInt(reflectValue reflect.Value, value int64) {
 	if reflectValue.Type().Kind() == reflect.Ptr {
-		reflectValue.Set(reflect.ValueOf(&value))
+		if reflectValue.Type().Elem().Kind() == reflect.Int {
+			ivalue := int(value)
+			reflectValue.Set(reflect.ValueOf(&ivalue))
+		} else {
+			reflectValue.Set(reflect.ValueOf(&value))
+		}
 	} else {
 		reflectValue.SetInt(value)
 	}
