@@ -378,7 +378,7 @@ func runSubcommand(stdout FDWriter, stderr io.Writer, parent interface{}, name s
 			}
 			continue
 		}
-		if len(arg) > 0 && arg[0] == '-' {
+		if len(arg) > 1 && arg[0] == '-' {
 			optionType, ok := optionTypes[arg]
 			if !ok {
 				// If we didn't find a match for the option, and it begins with
@@ -448,11 +448,13 @@ func runSubcommand(stdout FDWriter, stderr io.Writer, parent interface{}, name s
 						break
 					}
 				}
+				if arg == "--" {
+					noMore = true
+					break
+				}
 				fmt.Fprintf(stderr, "unknown option %q\n", arg)
 				return 1
 			}
-		} else if arg == "--" {
-			noMore = true
 		} else {
 			if ret, code := addArg(); ret {
 				return code
