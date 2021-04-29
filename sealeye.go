@@ -180,7 +180,15 @@ func runSubcommand(stdout FDWriter, stderr io.Writer, parent interface{}, name s
 				if dflt == "" {
 					continue
 				} else if strings.HasPrefix(dflt, "env:") {
-					defaultsHelp = append(defaultsHelp, "$"+dflt[len("env:"):])
+					envdflt := dflt[len("env:"):]
+					defaultsHelp = append(defaultsHelp, "$"+envdflt)
+					i := strings.IndexByte(envdflt, '{')
+					if i >= 0 {
+						j := strings.IndexByte(envdflt[i:], '}')
+						if j >= 0 {
+							defaultsHelp[len(defaultsHelp)-1] = envdflt[:i] + "$" + envdflt[i:]
+						}
+					}
 				} else if dflt == "terminal" {
 					defaultsHelp = append(defaultsHelp, "if terminal")
 				} else {
@@ -242,26 +250,40 @@ func runSubcommand(stdout FDWriter, stderr io.Writer, parent interface{}, name s
 						if dflt == "" {
 							continue
 						} else if strings.HasPrefix(dflt, "env:") {
-							if env, ok := os.LookupEnv(dflt[len("env:"):]); ok {
+							envdflt := dflt[len("env:"):]
+							prefix := ""
+							suffix := ""
+							i := strings.IndexByte(envdflt, '{')
+							if i >= 0 {
+								j := strings.IndexByte(envdflt[i:], '}')
+								if j >= 0 {
+									j += i
+									prefix = envdflt[:i]
+									suffix = envdflt[j+1:]
+									envdflt = envdflt[i+1 : j]
+								}
+							}
+							if env, ok := os.LookupEnv(envdflt); ok {
+								env = prefix + env + suffix
 								switch optionType {
 								case "duration":
 									d, err := time.ParseDuration(env)
 									if err != nil {
-										fmt.Fprintf(stderr, "invalid duration %q for option %q via $%s\n", env, optionName, dflt[len("env:"):])
+										fmt.Fprintf(stderr, "invalid duration %q for option %q via $%s\n", env, optionName, envdflt)
 										return 1
 									}
 									setDuration(optionValues[optionName], d)
 								case "bool":
 									b, err := strconv.ParseBool(env)
 									if err != nil {
-										fmt.Fprintf(stderr, "invalid boolean %q for option %q via $%s\n", env, optionName, dflt[len("env:"):])
+										fmt.Fprintf(stderr, "invalid boolean %q for option %q via $%s\n", env, optionName, envdflt)
 										return 1
 									}
 									setBool(optionValues[optionName], b)
 								case "int":
 									i, err := strconv.ParseInt(env, 10, 64)
 									if err != nil {
-										fmt.Fprintf(stderr, "invalid integer %q for option %q via $%s\n", env, optionName, dflt[len("env:"):])
+										fmt.Fprintf(stderr, "invalid integer %q for option %q via $%s\n", env, optionName, envdflt)
 										return 1
 									}
 									setInt(optionValues[optionName], i)
